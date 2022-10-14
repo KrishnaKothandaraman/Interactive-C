@@ -5,6 +5,14 @@
 #include<stdlib.h>
 #include<unistd.h>
 
+void pointer_shift_to_left_by_one(char *a[]) {
+   int i;
+   for (i = 0; *(a+i) != NULL; i++) {
+      *(a+i) = *(a+i+1);
+   }
+}
+
+
 void display_prompt(){
     printf("3230shell ## ");
 
@@ -51,6 +59,15 @@ int main(){
     while(1){
         display_prompt();
         read_commands(command, params);
+        // timeX variable keeps track of whether timeX was entered
+        int timeX = 0;
+        if (strcmp(params[0], "timeX") == 0){
+            timeX = 1;
+            pointer_shift_to_left_by_one(params);
+            printf("TimeX not implemented\n");
+            break;
+        }
+
         int child = fork();
         if(child == -1){
             printf("fork() Failed! %s", strerror(errno));
