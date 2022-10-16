@@ -12,14 +12,14 @@
 int parent_pid;
 int waiting_for_input = 1;
 
-typedef struct ShellCommand {
-    char *command;
+typedef struct ShellProcess {
+    int pid;
+    char *command[200];
     char *params[30];
     int paramPtr;
     int timeX;
     int backgroundProcess;
-} shell_command;
-
+} shell_process;
 
 void pointer_shift_to_left_by_one(char *a[]) {
    int i;
@@ -39,8 +39,8 @@ void display_prompt(){
 
 }
 
-
-void read_commands(char cmd[], char *par[]){
+/* return 1 if error occured, 0 if no error occured during parsing */
+int read_commands(shell_process shell_cmd_array[]){
     char input[1024];
     int ct = 0, i = 0, j = 0;
     char *arr[100], *words;
@@ -70,15 +70,14 @@ void read_commands(char cmd[], char *par[]){
     }
     printf("\n");
     
+    shell_process newcmd;
+    memset(&newcmd, 0, sizeof(shell_process));
     int structPtr = 0;
-    shell_command newcmd;
-    shell_command shell_cmd_array[1024];
-    printf("Doing processing shit\n");
+    // printf("Doing processing shit\n");
     for(int pt = 0; pt < i; pt ++){
         if (strcmp(arr[pt], "|") == 0){
-            printf("Break found!\n");
             shell_cmd_array[structPtr++] = newcmd;
-            memset(&newcmd, 0, sizeof(shell_command));
+            memset(&newcmd, 0, sizeof(shell_process));
         }
         else{
             newcmd.params[newcmd.paramPtr] = arr[pt];
@@ -86,28 +85,30 @@ void read_commands(char cmd[], char *par[]){
         }
     }
 
-    shell_cmd_array[structPtr] = newcmd;
-
-    printf("Printing struct arr details\n");
-    for(int k=0;k<=structPtr;k++){
-        printf("Printing details of struct %d\n", k);
-        for(int l=0;l<shell_cmd_array[k].paramPtr;l++){
-            printf("%s ", shell_cmd_array[k].params[l]);
+    shell_cmd_array[structPtr++] = newcmd;
+    // printf("Processing shit done\n");
+    // printf("struct ptr val = %d\n", structPtr);
+    for(int k = 0; k < structPtr ; k++){
+        if (strcmp(shell_cmd_array[k].params[0], "timeX") == 0){
+            // timeX variable keeps track of whether timeX was entered
+            if (shell_cmd_array[k].params[1] == NULL){
+                fprintf(stderr, "[ERROR] \"timeX\" cannot be a standalone command\n");
+                return 1;
+            }
+            strcpy(shell_cmd_array[k].command, shell_cmd_array[k].params[1]);
+            shell_cmd_array[k].timeX = 1;
         }
-        printf("\n");
-    }
-    exit(0);
-    if (strcmp(arr[0], "timeX") == 0){
-        strcpy(cmd, arr[1]);
-    }
-    else{
-        strcpy(cmd, arr[0]);
+        else{
+            strcpy(shell_cmd_array[k].command, shell_cmd_array[k].params[0]);
+        }
+
     }
 
-    for(j = 0;j < i; j++){
-        par[j] = arr[j];
+    printf("Printing struct command and timeX details\n");
+    for(int k = 0; k < structPtr ; k++){
+        printf("Struct %d command = %s timeX = %d\n", k, shell_cmd_array[k].command, shell_cmd_array[k].timeX);
     }
-    par[j] = NULL;
+    return 0;
 }
 
 void sigHandler(int signum, siginfo_t *sig, void *v){
@@ -122,6 +123,8 @@ void sigHandler(int signum, siginfo_t *sig, void *v){
 
 int main(){
     char command[200], *params[30];
+
+    shell_process shell_process_array[1024];
     struct rusage usage;
     int timeX;
     struct sigaction sa;
@@ -136,7 +139,11 @@ int main(){
     while(1){
         waiting_for_input = 1;
         display_prompt();
-        read_commands(command, params);
+        int parsingerr = read_commands(shell_process_array);
+        if(parsingerr){
+            continue;
+        }
+        exit(0);
         waiting_for_input = 0;
         timeX = 0;
         if (strcmp(params[0], "exit") == 0){
@@ -146,14 +153,6 @@ int main(){
             }
             printf("3200shell: Terminated\n");
             exit(0);
-        }
-        // timeX variable keeps track of whether timeX was entered
-        if (strcmp(params[0], "timeX") == 0){
-            timeX = 1;
-            pointer_shift_to_left_by_one(params);
-            if (params[0] == NULL){
-                fprintf(stderr, "[ERROR] \"timeX\" cannot be a standalone command\n");
-            }
         }
 
         // set mask for SIGUSR1. Placed before fork for synchoronization purposes
