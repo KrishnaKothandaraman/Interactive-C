@@ -14,10 +14,10 @@ int waiting_for_input = 1;
 
 typedef struct ShellProcess {
     int pid;
+    int timeX;
     char *command[200];
     char *params[30];
     int paramPtr;
-    int timeX;
     int backgroundProcess;
 } shell_process;
 
@@ -40,7 +40,7 @@ void display_prompt(){
 }
 
 /* return 1 if error occured, 0 if no error occured during parsing */
-int read_commands(shell_process shell_cmd_array[]){
+int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
     char input[1024];
     int ct = 0, i = 0, j = 0;
     char *arr[100], *words;
@@ -72,11 +72,10 @@ int read_commands(shell_process shell_cmd_array[]){
     
     shell_process newcmd;
     memset(&newcmd, 0, sizeof(shell_process));
-    int structPtr = 0;
     // printf("Doing processing shit\n");
     for(int pt = 0; pt < i; pt ++){
         if (strcmp(arr[pt], "|") == 0){
-            shell_cmd_array[structPtr++] = newcmd;
+            shell_cmd_array[(*cmd_ptr)++] = newcmd;
             memset(&newcmd, 0, sizeof(shell_process));
         }
         else{
@@ -84,19 +83,25 @@ int read_commands(shell_process shell_cmd_array[]){
             newcmd.paramPtr++;
         }
     }
-
-    shell_cmd_array[structPtr++] = newcmd;
-    // printf("Processing shit done\n");
-    // printf("struct ptr val = %d\n", structPtr);
-    for(int k = 0; k < structPtr ; k++){
+    shell_cmd_array[(*cmd_ptr)++] = newcmd;
+    for(int k = 0; k < *cmd_ptr ; k++){
         if (strcmp(shell_cmd_array[k].params[0], "timeX") == 0){
-            // timeX variable keeps track of whether timeX was entered
             if (shell_cmd_array[k].params[1] == NULL){
                 fprintf(stderr, "[ERROR] \"timeX\" cannot be a standalone command\n");
                 return 1;
             }
             strcpy(shell_cmd_array[k].command, shell_cmd_array[k].params[1]);
+            pointer_shift_to_left_by_one(shell_cmd_array[k].params);
             shell_cmd_array[k].timeX = 1;
+        }
+        else if (strcmp(shell_cmd_array[k].params[0], "exit") == 0){
+            // timeX variable keeps track of whether timeX was entered
+            if (shell_cmd_array[k].params[1] != NULL){
+                fprintf(stderr, "[ERROR] \"exit\" must be a standalone command\n");
+                return 1;
+            }
+            printf("3200shell: Terminating\n");
+            exit(0);
         }
         else{
             strcpy(shell_cmd_array[k].command, shell_cmd_array[k].params[0]);
@@ -104,10 +109,10 @@ int read_commands(shell_process shell_cmd_array[]){
 
     }
 
-    printf("Printing struct command and timeX details\n");
-    for(int k = 0; k < structPtr ; k++){
-        printf("Struct %d command = %s timeX = %d\n", k, shell_cmd_array[k].command, shell_cmd_array[k].timeX);
-    }
+    // printf("Printing struct command and timeX details\n");
+    // for(int k = 0; k < *cmd_ptr ; k++){
+    //     printf("Struct %d command = %s timeX = %d\n", k, shell_cmd_array[k].command, shell_cmd_array[k].timeX);
+    // }
     return 0;
 }
 
@@ -137,23 +142,20 @@ int main(){
 	sigaction(SIGINT, &sa, NULL);
 
     while(1){
+        int pfd1[2];
+        int pfd2[2];
+
+        pipe(pfd1);
+        pipe(pfd2);
+        int timeX = 0;
+        int shell_cmd_len = 0;
         waiting_for_input = 1;
         display_prompt();
-        int parsingerr = read_commands(shell_process_array);
-        if(parsingerr){
+        int err = read_commands(shell_process_array, &shell_cmd_len);
+        if (err){
             continue;
         }
-        exit(0);
         waiting_for_input = 0;
-        timeX = 0;
-        if (strcmp(params[0], "exit") == 0){
-            if(params[1] != NULL){
-                fprintf(stderr, "exit must be a standalone command!\n");
-                continue;
-            }
-            printf("3200shell: Terminated\n");
-            exit(0);
-        }
 
         // set mask for SIGUSR1. Placed before fork for synchoronization purposes
         sigset_t sigset;
@@ -161,7 +163,6 @@ int main(){
         sigemptyset(&sigset);
         sigaddset(&sigset, SIGUSR1);
         sigprocmask(SIG_BLOCK, &sigset, NULL);
-
         int child = fork();
         if(child == -1){
             fprintf(stderr, "[ERROR] fork() Failed! %s", strerror(errno));
@@ -175,8 +176,9 @@ int main(){
                 exit(1);
             }
             //child process. Start new process
-            if (execvp(command, params) == -1){
+            if (execvp(shell_process_array[0].command, shell_process_array[0].params) == -1){
                 fprintf(stderr, "[ERROR] '%s' %s %d\n", command, strerror(errno), (int) getpid());
+                printf("L what an exit\n");
                 exit(errno);
             }
         }
@@ -200,8 +202,8 @@ int main(){
                 }
             }
 
-            if (timeX) {
-            printf("3200 shell: (PID)%d  (CMD)%s    (user)%f s  (sys)%f s\n",child, command, convert_to_seconds(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec), convert_to_seconds(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec));
+            if (shell_process_array[0].timeX) {
+                printf("3200 shell: (PID)%d  (CMD)%s    (user)%f s  (sys)%f s\n",child, command, convert_to_seconds(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec), convert_to_seconds(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec));
             }
         }
     }
