@@ -142,11 +142,6 @@ int main(){
 	sigaction(SIGINT, &sa, NULL);
 
     while(1){
-        int pfd1[2];
-        int pfd2[2];
-
-        pipe(pfd1);
-        pipe(pfd2);
         int timeX = 0;
         int shell_cmd_len = 0;
         waiting_for_input = 1;
@@ -163,32 +158,120 @@ int main(){
         sigemptyset(&sigset);
         sigaddset(&sigset, SIGUSR1);
         sigprocmask(SIG_BLOCK, &sigset, NULL);
-        int child = fork();
-        if(child == -1){
-            fprintf(stderr, "[ERROR] fork() Failed! %s", strerror(errno));
-            continue;
-        }
-        if (child == 0){
-            // child logic
-            int res = sigwait(&sigset, &sig);
-            if (res != 0){
-                fprintf(stderr, "Error occured while waiting for signal %s", strerror(errno));
+        printf("Number of commands entered %d\n", shell_cmd_len);
+
+        // 2D array of pipes for child processes. Number of pipes = children - 1
+        int pfd[shell_cmd_len - 1][2];
+        int result = -1;
+        
+        printf("Creating %d pipes\n", shell_cmd_len -1);
+        // create pipes
+        for (int s = 0; s < shell_cmd_len - 1; s++) {
+
+            result = pipe(pfd[s]);
+            if (result == -1) {
+                fprintf(stderr, "Error occured during pipe creation of child %d\n", s);
                 exit(1);
             }
-            //child process. Start new process
-            if (execvp(shell_process_array[0].command, shell_process_array[0].params) == -1){
-                fprintf(stderr, "[ERROR] '%s' %s %d\n", command, strerror(errno), (int) getpid());
-                printf("L what an exit\n");
-                exit(errno);
+        }
+        // Array to store PID of children for parent to handle after
+        int child_pid_array[shell_cmd_len];
+
+        for (int ch = 0; ch < shell_cmd_len; ch++){
+            int child = fork();
+            // fork fail
+            if(child == -1){
+                fprintf(stderr, "[ERROR] fork() Failed! %s\n", strerror(errno));
+                continue;
+            }
+            child_pid_array[ch] = child;
+
+            // only child executes this logic
+            if (child == 0){
+                // child logic
+                printf("[CHILD] Child %d waiting for SIGUSR1\n", ch);
+                int res = sigwait(&sigset, &sig);
+                printf("[CHILD] Child %d received SIGUSR1\n", ch);
+                if (res != 0){
+                    fprintf(stderr, "Error occured while waiting for signal %s", strerror(errno));
+                    exit(1);
+                }
+
+                // If we are not the first program in the pipe
+                if (ch > 0) {
+                    // Use the output from the previous program in the pipe as our input
+                    // Check the read end of the pipe and STDIN are different descriptors
+                    if (pfd[ch - 1][0] != STDIN_FILENO) {
+                        // Send the read end of the pipe to STDIN
+                        if (dup2(pfd[ch - 1][0], STDIN_FILENO) == -1) {
+                            fprintf(stderr, "Error occured during pipe input end management of child %d\n", ch);
+                            exit(1);                    
+                        }
+                    }
+                    printf("[CHILD] %d rerouted stdin\n");
+                }
+
+                // Before we execute a process, bind the write end of the pipe to STDOUT
+                // Don't do this to the last process in the pipe, just send output to STDOUT as normal
+                if (ch < shell_cmd_len - 1) {
+                    // Check the write end of the pipe and STDOUT are different descriptors
+                    if (pfd[ch][1] != STDOUT_FILENO) {
+                        // Send the write end of the pipe to STDOUT
+                        if (dup2(pfd[ch][1], STDOUT_FILENO) == -1) {
+                            fprintf(stderr, "Error occured during pipe output end management of child %d\n", ch);
+                            exit(1);   
+                        }
+                    }
+                    printf("[CHILD] %d rerouted stdout\n");
+                }
+
+                for (int j = 0; j < shell_cmd_len - 1; j++) {
+                    printf("[CHILD] %d Closing ends of pipe %d\n", child , j);
+                    if(close(pfd[j][0]) == -1){
+                        fprintf(stderr, "Error occured during pipe closure of child %n\n", j);
+                        exit(1);   
+                    }
+                    if(close(pfd[j][1]) == -1){
+                        fprintf(stderr, "Error occured during pipe closure of child %n\n", j);
+                        exit(1);   
+                    }
+                }
+
+                //child process. Start new process
+                if (execvp(shell_process_array[ch].command, shell_process_array[ch].params) == -1){
+                    fprintf(stderr, "[ERROR] '%s' %s %d\n", command, strerror(errno), (int) getpid());
+                    exit(errno);
+                    }
             }
         }
-        else{
-            // parent logic
+        
+        int n = 0;
+        int status;
+        int child_pid;
+        // parent logic
 
-            //send SIGUSR1 to child
-            kill(child, SIGUSR1);
-            int status;
-            waitpid(child, &status, 0);  // wait for child to terminate
+        for (int j = 0; j < shell_cmd_len - 1; j++) {
+            printf("[PARENT] %d Closing ends of pipe %d\n" , 0);
+            if(close(pfd[j][0]) == -1){
+                fprintf(stderr, "Error occured during pipe closure of child %n\n", j);
+                exit(1);   
+            }
+            if(close(pfd[j][1]) == -1){
+                fprintf(stderr, "Error occured during pipe closure of child %n\n", j);
+                exit(1);   
+            }
+        }
+
+        while (n < shell_cmd_len){
+
+            printf("[PARENT] Sending SIGUSR1 to child %d\n", n);
+
+            //send SIGUSR1 to child[n]. Synchronization purpose
+            kill(child_pid_array[n], SIGUSR1);
+            
+            // wait for that child to terminate
+            child_pid = wait(&status);  // wait for child to terminate
+            printf("Process %d exited\n", child_pid);
             getrusage(RUSAGE_CHILDREN, &usage);
             // TODO: FIGURE OUT WTF IS GOING ON???
             if(WIFSIGNALED(status)){
@@ -203,8 +286,9 @@ int main(){
             }
 
             if (shell_process_array[0].timeX) {
-                printf("3200 shell: (PID)%d  (CMD)%s    (user)%f s  (sys)%f s\n",child, command, convert_to_seconds(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec), convert_to_seconds(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec));
+                printf("3200 shell: (PID)%d  (CMD)%s    (user)%f s  (sys)%f s\n",child_pid, command, convert_to_seconds(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec), convert_to_seconds(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec));
             }
+            n++;
         }
     }
 }
