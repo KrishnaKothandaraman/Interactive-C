@@ -11,8 +11,11 @@
 // parent's process ID
 int parent_pid;
 int waiting_for_input = 1;
-
-
+int running_background_processes[1024];
+int bg_ctr = 0;
+char bg_end_messages[100][100];
+int bg_em_ptr_l = 0;
+int bg_em_ptr_r = 0;
 /*
 
 Name: Krishna Kothandaraman
@@ -22,8 +25,7 @@ Features implemented
 1. Stage 1 all
 2. Stage 2 all
 3. Stage 3 all
-4. Stage 4 - accept 5 pipes commands
-
+4. Stage 4 - accept 5 pipes commands, run background processes, detect termination of bg processes
 
 */
 
@@ -53,6 +55,10 @@ float convert_to_seconds(int seconds, long int microseconds){
 
 void display_prompt(){
     fseek(stdin, 0, SEEK_END);
+    // print any pending background end messages
+    for(bg_em_ptr_l; bg_em_ptr_l < bg_em_ptr_r ; bg_em_ptr_l++){
+        printf("%s", bg_end_messages[bg_em_ptr_l]);
+    }
     printf("3230shell ## ");
 
 }
@@ -100,6 +106,11 @@ int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
             memset(&newcmd, 0, sizeof(shell_process));
         }
         else{
+            if (strcmp(arr[pt], "&") == 0){
+                printf("Background found!\n");
+                newcmd.backgroundProcess = 1;
+                continue;
+            }
             newcmd.params[newcmd.paramPtr] = arr[pt];
             newcmd.paramPtr++;
         }
@@ -141,10 +152,35 @@ int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
 void sigHandler(int signum, siginfo_t *sig, void *v){
     if(signum == SIGINT){
         if (!waiting_for_input){
+            printf("Interrupt\n");
             return;
         }
         printf("\n");
         display_prompt();
+    }
+    else if(signum == SIGCHLD){
+        int terminatedchild = sig->si_pid;
+        int isbgProc = 0;
+        for (int i = 0; i < bg_ctr; i++){
+            if(running_background_processes[i] == terminatedchild){
+                isbgProc = 1;
+            }
+        }
+        // if bg process terminated
+        if(!isbgProc)
+            return;
+        int status;
+        // wait and remove zombie
+        int c_pid = waitpid(terminatedchild, &status, 0);  // clean up zombie child
+
+        // save terminated statement to print next time before shell cmd
+        char str1[] = "[%d] Terminated\n";
+        char str2[200];
+        sprintf(str2, str1, c_pid);
+        strcpy(bg_end_messages[bg_em_ptr_r++], str2);
+    }
+    else if(signum == SIGKILL){
+        printf("Killed\n");
     }
 }
 
@@ -162,6 +198,12 @@ int main(){
 	sa.sa_flags = SA_SIGINFO;
 	sa.sa_sigaction = sigHandler;
 	sigaction(SIGINT, &sa, NULL);
+
+    // register sigaction for SIGCHLD
+    sigaction(SIGCHLD, NULL, &sa);
+	sa.sa_flags = SA_SIGINFO;
+	sa.sa_sigaction = sigHandler;
+	sigaction(SIGCHLD, &sa, NULL);
 
     while(1){
         int timeX = 0;
@@ -262,6 +304,7 @@ int main(){
 
                 // printf("Child %d executing command %s\n", ch,shell_process_array[ch].command);
                 //child process. Start new process
+
                 if (execvp(shell_process_array[ch].command, shell_process_array[ch].params) == -1){
                     fprintf(stderr, "3200shell: '%s' %s\n", shell_process_array[ch].command, strerror(errno));
                     exit(errno);
@@ -299,25 +342,23 @@ int main(){
             //send SIGUSR1 to child[n]. Synchronization purpose
             kill(child_pid_array[n], SIGUSR1);
             int status;
+
+            if (shell_process_array[n].backgroundProcess){
+                // if background process
+                child_pid = waitpid(child_pid_array[n], &status, WNOHANG);  // wait for child to terminate
+                running_background_processes[bg_ctr++] = child_pid_array[n];
+                break;
+            }
+            else{
             // wait for that child to terminate
-            child_pid = waitpid(child_pid_array[n], &status, 0);  // wait for child to terminate
+                child_pid = waitpid(child_pid_array[n], &status, 0);  // wait for child to terminate
+            }
             // printf("Process %d exited\n", child_pid);
             if ( WIFEXITED(status) ) {
                 int es = WEXITSTATUS(status);
                 // printf("Exit status was %d\n", es);
             }
             getrusage(RUSAGE_CHILDREN, &usage);
-            if(WIFSIGNALED(status)){
-                int terminating_signal = (int) WTERMSIG(status);
-                printf("Child %d exited cause of signal! %d\n", child_pid_array[n],terminating_signal);
-                if (terminating_signal == 124){
-                    printf("Interrupt\n");
-                }
-                else if(terminating_signal == SIGKILL){
-                    printf("Killed\n");
-                }
-            }
-
             if (shell_process_array[0].timeX) {
                 char str1[] = "3200 shell: (PID)%d  (CMD)%s    (user)%.3f s  (sys)%.3f s\n";
                 char str2[200];
