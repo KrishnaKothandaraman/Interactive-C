@@ -12,6 +12,23 @@
 int parent_pid;
 int waiting_for_input = 1;
 
+
+/*
+
+Name: Krishna Kothandaraman
+UID: 3035660756
+
+Features implemented
+1. Stage 1 all
+2. Stage 2 all
+3. Stage 3 all
+4. Stage 4 - accept 5 pipes commands
+
+
+*/
+
+
+// struct for keeping track of process details
 typedef struct ShellProcess {
     int pid;
     int timeX;
@@ -21,6 +38,7 @@ typedef struct ShellProcess {
     int backgroundProcess;
 } shell_process;
 
+// util
 void pointer_shift_to_left_by_one(char *a[]) {
    int i;
    for (i = 0; *(a+i) != NULL; i++) {
@@ -28,7 +46,7 @@ void pointer_shift_to_left_by_one(char *a[]) {
    }
 }
 
-
+//util
 float convert_to_seconds(int seconds, long int microseconds){
     return (seconds + (1e-6*microseconds));
 }
@@ -56,23 +74,26 @@ int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
         }
     }
     input[ct] = '\0';
-    printf("[INFO]: User entered command: %s", input);
-    // TODO: FIGURE OUT WHY SPACES BREAK THIS!
+    // printf("[INFO]: User entered command: %s", input);
+
+    // break into words by token
     words = strtok(input, "| \n");
 
     while (words != NULL){
         arr[i++] = strdup(words);
         words = strtok(NULL, " \n");
     }
-    printf("[INFO]: Tokenized command is: ");
-    for(int j = 0; j < i; j ++){
-        printf("%s, ", arr[j]);
-    }
-    printf("\n");
+    // printf("[INFO]: Tokenized command is: ");
+    // for(int j = 0; j < i; j ++){
+    //     printf("%s, ", arr[j]);
+    // }
+    // printf("\n");
     
+    // create new shellcmd and allocate memory
     shell_process newcmd;
     memset(&newcmd, 0, sizeof(shell_process));
-    // printf("Doing processing shit\n");
+
+    // break input down into struct format
     for(int pt = 0; pt < i; pt ++){
         if (strcmp(arr[pt], "|") == 0){
             shell_cmd_array[(*cmd_ptr)++] = newcmd;
@@ -83,11 +104,12 @@ int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
             newcmd.paramPtr++;
         }
     }
+
     shell_cmd_array[(*cmd_ptr)++] = newcmd;
     for(int k = 0; k < *cmd_ptr ; k++){
         if (strcmp(shell_cmd_array[k].params[0], "timeX") == 0){
             if (shell_cmd_array[k].params[1] == NULL){
-                fprintf(stderr, "[ERROR] \"timeX\" cannot be a standalone command\n");
+                fprintf(stderr, "3200shell \"timeX\" cannot be a standalone command\n");
                 return 1;
             }
             strcpy(shell_cmd_array[k].command, shell_cmd_array[k].params[1]);
@@ -97,7 +119,7 @@ int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
         else if (strcmp(shell_cmd_array[k].params[0], "exit") == 0){
             // timeX variable keeps track of whether timeX was entered
             if (shell_cmd_array[k].params[1] != NULL){
-                fprintf(stderr, "[ERROR] \"exit\" must be a standalone command\n");
+                fprintf(stderr, "3200shell \"exit\" must be a standalone command\n");
                 return 1;
             }
             printf("3200shell: Terminating\n");
@@ -158,13 +180,13 @@ int main(){
         sigemptyset(&sigset);
         sigaddset(&sigset, SIGUSR1);
         sigprocmask(SIG_BLOCK, &sigset, NULL);
-        printf("Number of commands entered %d\n", shell_cmd_len);
+        // printf("Number of commands entered %d\n", shell_cmd_len);
 
         // 2D array of pipes for child processes. Number of pipes = children - 1
         int pfd[shell_cmd_len - 1][2];
         int result = -1;
         
-        printf("Creating %d pipes\n", shell_cmd_len -1);
+        // printf("Creating %d pipes\n", shell_cmd_len -1);
         // create pipes
         for (int s = 0; s < shell_cmd_len - 1; s++) {
 
@@ -176,27 +198,19 @@ int main(){
         }
         // Array to store PID of children for parent to handle after
         int child_pid_array[shell_cmd_len];
-
-        for (int ch = 0; ch < shell_cmd_len; ch++){
+        for (int ch = 0; ch <= shell_cmd_len - 1; ch++){
             int child = fork();
             // fork fail
             if(child == -1){
-                fprintf(stderr, "[ERROR] fork() Failed! %s\n", strerror(errno));
+                fprintf(stderr, "3200shell fork() Failed! %s\n", strerror(errno));
                 continue;
             }
-            child_pid_array[ch] = child;
 
             // only child executes this logic
             if (child == 0){
+                // printf("[CHILD] %d pid = %d\n", ch, (int) getpid());
                 // child logic
-                printf("[CHILD] Child %d waiting for SIGUSR1\n", ch);
-                int res = sigwait(&sigset, &sig);
-                printf("[CHILD] Child %d received SIGUSR1\n", ch);
-                if (res != 0){
-                    fprintf(stderr, "Error occured while waiting for signal %s", strerror(errno));
-                    exit(1);
-                }
-
+                // printf("[CHILD] Child %d waiting for SIGUSR1\n", ch);
                 // If we are not the first program in the pipe
                 if (ch > 0) {
                     // Use the output from the previous program in the pipe as our input
@@ -208,7 +222,7 @@ int main(){
                             exit(1);                    
                         }
                     }
-                    printf("[CHILD] %d rerouted stdin\n");
+                    // printf("[CHILD] %d rerouted stdin\n", ch);
                 }
 
                 // Before we execute a process, bind the write end of the pipe to STDOUT
@@ -218,15 +232,16 @@ int main(){
                     if (pfd[ch][1] != STDOUT_FILENO) {
                         // Send the write end of the pipe to STDOUT
                         if (dup2(pfd[ch][1], STDOUT_FILENO) == -1) {
-                            fprintf(stderr, "Error occured during pipe output end management of child %d\n", ch);
+                            printf("Error occured during pipe output end management of child %d = %s\n", ch, strerror(errno));
                             exit(1);   
                         }
                     }
-                    printf("[CHILD] %d rerouted stdout\n");
+                    // printf("[CHILD] %d rerouted stdout\n", ch);
                 }
-
+                
+                // close pipes for child
                 for (int j = 0; j < shell_cmd_len - 1; j++) {
-                    printf("[CHILD] %d Closing ends of pipe %d\n", child , j);
+                    // printf("[CHILD] %d Closing ends of pipe %d\n", child , j);
                     if(close(pfd[j][0]) == -1){
                         fprintf(stderr, "Error occured during pipe closure of child %n\n", j);
                         exit(1);   
@@ -237,21 +252,35 @@ int main(){
                     }
                 }
 
+                // wait for sigusr1
+                int res = sigwait(&sigset, &sig);
+                // printf("[CHILD] Child %d received SIGUSR1\n", ch);
+                if (res != 0){
+                    fprintf(stderr, "Error occured while waiting for signal %s", strerror(errno));
+                    exit(1);
+                }
+
+                // printf("Child %d executing command %s\n", ch,shell_process_array[ch].command);
                 //child process. Start new process
                 if (execvp(shell_process_array[ch].command, shell_process_array[ch].params) == -1){
-                    fprintf(stderr, "[ERROR] '%s' %s %d\n", command, strerror(errno), (int) getpid());
+                    fprintf(stderr, "3200shell: '%s' %s\n", shell_process_array[ch].command, strerror(errno));
                     exit(errno);
                     }
+            }
+            else{
+                child_pid_array[ch] = child;
             }
         }
         
         int n = 0;
-        int status;
         int child_pid;
         // parent logic
+        
+        char running_stats[10][200];
 
+        // close parent pipes
         for (int j = 0; j < shell_cmd_len - 1; j++) {
-            printf("[PARENT] %d Closing ends of pipe %d\n" , 0);
+            // printf("[PARENT] Closing ends of pipe %d\n" , j);
             if(close(pfd[j][0]) == -1){
                 fprintf(stderr, "Error occured during pipe closure of child %n\n", j);
                 exit(1);   
@@ -262,21 +291,25 @@ int main(){
             }
         }
 
+        // handle children processing logic
         while (n < shell_cmd_len){
 
-            printf("[PARENT] Sending SIGUSR1 to child %d\n", n);
+            // printf("[PARENT] Sending SIGUSR1 to child %d\n", n);
 
             //send SIGUSR1 to child[n]. Synchronization purpose
             kill(child_pid_array[n], SIGUSR1);
-            
+            int status;
             // wait for that child to terminate
-            child_pid = wait(&status);  // wait for child to terminate
-            printf("Process %d exited\n", child_pid);
+            child_pid = waitpid(child_pid_array[n], &status, 0);  // wait for child to terminate
+            // printf("Process %d exited\n", child_pid);
+            if ( WIFEXITED(status) ) {
+                int es = WEXITSTATUS(status);
+                // printf("Exit status was %d\n", es);
+            }
             getrusage(RUSAGE_CHILDREN, &usage);
-            // TODO: FIGURE OUT WTF IS GOING ON???
             if(WIFSIGNALED(status)){
                 int terminating_signal = (int) WTERMSIG(status);
-                printf("Child exited cause of signal! %d\n", terminating_signal);
+                printf("Child %d exited cause of signal! %d\n", child_pid_array[n],terminating_signal);
                 if (terminating_signal == 124){
                     printf("Interrupt\n");
                 }
@@ -286,9 +319,18 @@ int main(){
             }
 
             if (shell_process_array[0].timeX) {
-                printf("3200 shell: (PID)%d  (CMD)%s    (user)%f s  (sys)%f s\n",child_pid, command, convert_to_seconds(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec), convert_to_seconds(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec));
+                char str1[] = "3200 shell: (PID)%d  (CMD)%s    (user)%.3f s  (sys)%.3f s\n";
+                char str2[200];
+                sprintf(str2, str1, child_pid, shell_process_array[n].command, convert_to_seconds(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec), convert_to_seconds(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec));
+                strcpy(running_stats[n], str2);
             }
             n++;
         }
+
+        if (shell_process_array[0].timeX){
+            for (int l = 0; l < n; l++){
+                printf("%s", running_stats[l]);
+            }
+        }   
     }
 }
