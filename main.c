@@ -99,7 +99,7 @@ int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
     shell_process newcmd;
     memset(&newcmd, 0, sizeof(shell_process));
 
-    // break input down into struct format
+    // break input down into struct format. Parse &, |
     for(int pt = 0; pt < i; pt ++){
         if (strcmp(arr[pt], "|") == 0){
             shell_cmd_array[(*cmd_ptr)++] = newcmd;
@@ -117,6 +117,7 @@ int read_commands(shell_process shell_cmd_array[], int *cmd_ptr){
     }
 
     shell_cmd_array[(*cmd_ptr)++] = newcmd;
+    // parse timeX, exit
     for(int k = 0; k < *cmd_ptr ; k++){
         if (strcmp(shell_cmd_array[k].params[0], "timeX") == 0){
             if (shell_cmd_array[k].params[1] == NULL){
@@ -360,6 +361,7 @@ int main(){
             }
             getrusage(RUSAGE_CHILDREN, &usage);
             if (shell_process_array[0].timeX) {
+                // save running stats
                 char str1[] = "3200 shell: (PID)%d  (CMD)%s    (user)%.3f s  (sys)%.3f s\n";
                 char str2[200];
                 sprintf(str2, str1, child_pid, shell_process_array[n].command, convert_to_seconds(usage.ru_utime.tv_sec, usage.ru_utime.tv_usec), convert_to_seconds(usage.ru_stime.tv_sec, usage.ru_stime.tv_usec));
@@ -367,7 +369,7 @@ int main(){
             }
             n++;
         }
-
+        // print running stats
         if (shell_process_array[0].timeX){
             for (int l = 0; l < n; l++){
                 printf("%s", running_stats[l]);
