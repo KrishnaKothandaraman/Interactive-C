@@ -37,22 +37,19 @@ int checking(unsigned int * list, long size) {
   return 1;
 }
 
-
-
+unsigned int * intarr; // array of random integers
 // global variables
 long size = 40; 
-long num_workers;  // size of the array
-unsigned int * intarr; // array of random integers
-
-int arr[] = {42, 98, 2, 31, 86, 87, 5, 13, 99, 44, 67, 37, 17, 7, 87, 3, 96, 71, 40, 19, 58, 13, 61, 77, 11, 13, 6, 81, 76, 18, 24, 14, 63, 59, 99, 17, 36, 84, 1, 48};
-const num_threads = 4;
+long num_threads;
 const Mxn = 1e8;
+const mxn_workers = 100;
+
 // every thread will push it's partitions here
-long *global_partitions[num_threads][num_threads];
+long *global_partitions[mxn_workers][mxn_workers];
 // keeps track of the length of each partition for each thread
-long thread_partition_counter[num_threads][num_threads];
+long thread_partition_counter[mxn_workers][mxn_workers];
 // tracks how many threads have pushed their partitions. Used for cond_wait
-int partiton_counter[num_threads];
+int partiton_counter[mxn_workers];
 pthread_mutex_t mutex;
 pthread_cond_t condPartition;
 
@@ -65,11 +62,11 @@ typedef struct start_stop_struct {
     // how many it's going to sort
     long len;
     // samples after phase 1
-    long *samples[num_threads];
+    long *samples[mxn_workers];
     // pivots after phase 2
-    long *pivots[num_threads - 1];
+    long *pivots[mxn_workers - 1];
     // stores local partitions of a thread
-    long *local_partitions[num_threads][Mxn];
+    long *local_partitions[mxn_workers][Mxn];
     // combined partitions from each thread
     long combined_partitions[Mxn]; 
     // stores length of combined partition
@@ -80,34 +77,40 @@ void *phase3_and_phase4(void* arg){
   start_stop_struct *s = (start_stop_struct*)arg;
   // stores local partitions
   long *local_partitions[num_threads][size/num_threads];
-  int start = 0;
+  int start = s->start_idx;
   int j;
   int thread_id = (s->start_idx)/(size/num_threads);
 
-  printf("Thread %d running routine start idx %ld len %ld\n", thread_id ,s->start_idx, s->len);
+  // printf("Thread %d running routine start idx %ld len %ld\n", thread_id ,s->start_idx, s->len);
   for (int i = 0; i < num_threads - 1; i++){
+    // printf("Processing pivot value %d\n", s->pivots[i]);
     j = start;
-    while (j < 10 && (arr[s->start_idx + j] <= s->pivots[i])){
+    while (j < s->start_idx + s->len && (intarr[j] <= s->pivots[i])){
       j++;
     }
-    printf("Found partition start: %d end %d\n", start, j-1);
+    // printf("Found partition start: %d end %d\n", start, j-1);
     // set partition length of thread = num of elements in partition found
     thread_partition_counter[thread_id][i] = j - start;
-    printf("Setting %d %d thread partition counter to %d\n", thread_id, i, j - start);
+    // printf("Setting thread %d's %d thread partition counter to %d\n", thread_id, i, j - start);
     for (int l = start; l <= j - 1; l++){
-      printf("Setting index %d of local partition row %d = %ld\n", l - start, i, arr[s->start_idx + l]);
-      s->local_partitions[i][l - start] = arr[s->start_idx + l];
+      // printf("Setting index %d of local partition row %d = %ld\n", l - start, i, intarr[l]);
+      s->local_partitions[i][l - start] = intarr[l];
+    }
+    // reached the end and no more partitions found. Increment j so that all other partitions will be out of bounds
+    if (j == size){
+      start = j = size;
     }
     start = j;
     }
 
     // set partition length of thread = num of elements in partition found
-    printf("Setting %d %d thread partition counter to %d\n", thread_id, num_threads - 1, s->len - start);
-    thread_partition_counter[thread_id][num_threads - 1] = s->len - start;
-    printf("Found partition start: %d end %d\n", start, s->len - 1);
-    for (int l = start; l <= s->len - 1; l++){
-      printf("Setting index %d of local partition row %d = %ld\n", l - start, num_threads - 1, arr[s->start_idx + l]);
-      s->local_partitions[num_threads - 1][l - start] = arr[s->start_idx + l];
+    // printf("Setting thread %d's %d thread partition counter to %d\n", thread_id, num_threads - 1, s->len + s->start_idx - start);
+    thread_partition_counter[thread_id][num_threads - 1] = s->len + s->start_idx - start;
+    // printf("Found partition start: %d end %d\n", start, s->len + s->start_idx - 1);
+    // printf("Starting value of l = %d\n", start);
+    for (int l = start; l <= s->len + s->start_idx - 1; l++){
+      // printf("Setting index %d of local partition row %d = %ld\n", l - start, num_threads - 1, intarr[l]);
+      s->local_partitions[num_threads - 1][l - start] = intarr[l];
     }
 
   pthread_mutex_lock(&mutex);
@@ -119,40 +122,40 @@ void *phase3_and_phase4(void* arg){
     partiton_counter[i]++;
     pthread_cond_broadcast(&condPartition);
     // printf("Global partitions %d %d = %p\n", i, thread_id, local_partitions[i]);
-    printf("Set global partitions %d %d\n", i, thread_id);
+    // printf("Set global partitions %d %d\n", i, thread_id);
     // printf("Thread %d released lock!\n", (s->start_idx)/(size2/num_threads));
   }
 
-  while (partiton_counter[thread_id] != 4){
-    printf("Thread %d Waiting on partitioning to finish\n", thread_id);
+  while (partiton_counter[thread_id] != num_threads){
+    // printf("Thread %d Waiting on partitioning to finish\n", thread_id);
     pthread_cond_wait(&condPartition, &mutex);
   }
-  printf("Thread %d partitioning done!\n", thread_id);
+  // printf("Thread %d partitioning done!\n", thread_id);
 
   // calculate length of combined partitions
   for (int i = 0; i < num_threads; i++){
     s->combined_partition_length += thread_partition_counter[i][thread_id];
   }
-  printf("Thread %d combined length %ld\n", thread_id, s->combined_partition_length);
+  // printf("Thread %d combined length %ld\n", thread_id, s->combined_partition_length);
   // buffer to store combined partitions
   // keeps track of end of combined partitions so far
   int partition_ctr = 0;
   for (int i = 0; i < num_threads ; i++){
-    printf("Trying to access global_partitions %d %d\n", thread_id, i);
+    // printf("Trying to access global_partitions %d %d\n", thread_id, i);
     long *part = global_partitions[thread_id][i];
     for (int k = 0; k < thread_partition_counter[i][thread_id]; k++){
       s->combined_partitions[partition_ctr] = part[k];
       partition_ctr++;
     }
   }
-  qsort(s->combined_partitions, s->combined_partition_length, sizeof(long), compare);
-  printf("Thread %d\n", thread_id);
-  for (int i =0;  i< partition_ctr ; i++){
-    printf("%ld ", s->combined_partitions[i]);
-  }
-  printf("\n");
-
   pthread_mutex_unlock(&mutex);
+  qsort(s->combined_partitions, s->combined_partition_length, sizeof(long), compare);
+  // printf("Thread %d\n", thread_id);
+  // for (int i =0;  i< partition_ctr ; i++){
+  //   printf("%ld ", s->combined_partitions[i]);
+  // }
+  // printf("\n");
+
 
   pthread_exit(s);
 
@@ -161,22 +164,57 @@ void *phase3_and_phase4(void* arg){
 void *sort_subarr(void* arg){
   // parsing argument given into struct
   start_stop_struct *s = (start_stop_struct*)arg;
-  printf("Thread %d Start sorting at %ld!\n", s->thread_count ,s->start_idx);
   // sort array of size length starting from index
-  qsort(arr + s->start_idx, s->len, sizeof(int), compare);
+  qsort(intarr + s->start_idx, s->len, sizeof(int), compare);
 
   for (int i = 0; i< num_threads; i++){
-    s->samples[i] = arr[s->start_idx + (i*size)/(num_threads*num_threads)];
+    s->samples[i] = intarr[s->start_idx + (i*size)/(num_threads*num_threads)];
   }
   pthread_exit(s);
 }
 
-int main(){
+int main(int argc, char **argv){
+
+  struct timeval start, end;
+
+  if ((argc <= 2))
+    {
+      printf("Usage: p_sort <number> [<no_of_workers>]\n");
+      exit(0);
+    }
+
+    if ((argc == 3)){
+      num_threads = atol(argv[2]);
+      if (num_threads <= 1){
+        printf("Error: Worker thread count must be greater than 1\n");
+        exit(0);
+      }
+    }
+  size = atol(argv[1]);
+
+  intarr = (unsigned int *)malloc(size*sizeof(unsigned int));
+  if (intarr == NULL) {perror("malloc"); exit(0); }
+
+  // set the random seed for generating a fixed random
+  // sequence across different runs
+  char * env = getenv("RANNUM");  //get the env variable
+  if (!env)                       //if not exists
+    srandom(3230);
+  else
+    srandom(atol(env));
+  
+  for (int i=0; i<size; i++) {
+    intarr[i] = random();
+  }
+  
+  // measure the start time
+  gettimeofday(&start, NULL);
 
   pthread_t th[num_threads];
   start_stop_struct* st = malloc(num_threads * sizeof(start_stop_struct));
   pthread_mutex_init(&mutex, NULL);
   pthread_cond_init(&condPartition, NULL);
+
   for (int i = 0; i < num_threads; i++){
     st[i].thread_count = i;
     st[i].start_idx = i*(size/num_threads);
@@ -255,97 +293,47 @@ int main(){
     pthread_join(th[i], &st[i]);
   }
 
-  for (int i =0 ;i< num_threads; i++){
-    printf("length of combined for thread %d = %ld\n", i , st[i].combined_partition_length);
-  }
+  // for (int i =0 ;i< num_threads; i++){
+  //   printf("length of combined for thread %d = %ld\n", i , st[i].combined_partition_length);
+  // }
   // keeps track of where are are in the array currently
   long arr_ptr = 0;
   for (int i = 0; i < num_threads; i ++){
-    printf("Thread %d\n", i);
+    // printf("Thread %d\n", i);
     for (int j = 0; j < st[i].combined_partition_length; j++){
-      printf("Saving arr index %d value %d\n", arr_ptr + j, st[i].combined_partitions[j]);
-      arr[arr_ptr + j] = st[i].combined_partitions[j];
+      // printf("Saving arr index %d value %d\n", arr_ptr + j, st[i].combined_partitions[j]);
+      intarr[arr_ptr + j] = st[i].combined_partitions[j];
     }
     arr_ptr += st[i].combined_partition_length;
   }
 
-  for (int i =0;i < size; i++){
-    printf("%d ", arr[i]);
-  }
-  printf("\n");
+  // for (int i =0;i < size; i++){
+  //   printf("%d ", intarr[i]);
+  // }
+  // printf("\n");
 
-  if (!checking(arr, size)) {
+  // for(int i = 0; i < size; i++){
+  //   printf("%d: %d\n", i, intarr[i]);
+  // }
+  
+  // for(int i=0;i<num_threads;i++){
+  //   printf("Partition counter %d = %d\n", i, partiton_counter[i]);
+  // }
+
+  // measure the end time
+  gettimeofday(&end, NULL);
+  printf("Total elapsed time: %.4f s\n", (end.tv_sec - start.tv_sec)*1.0 + (end.tv_usec - start.tv_usec)/1000000.0);
+
+  if (!checking(intarr, size)) {
     printf("The array is not in sorted order!!\n");
   }
   else{
-    printf("SORTED!\n");
-  }
-  // for(int i = 0; i < size2; i++){
-  //   printf("%d: %d\n", i, arr[i]);
-  // }
-  
-  for(int i=0;i<num_threads;i++){
-    printf("Partition counter %d = %d\n", i, partiton_counter[i]);
+    printf("Sorted!\n");
   }
 
   pthread_mutex_destroy(&mutex);
   pthread_cond_destroy(&condPartition);
   free(st);
-  return 0;
-}
-
-
-
-int main2 (int argc, char **argv)
-{
-  long i, j;
-  struct timeval start, end;
-
-  if ((argc <= 2))
-  {
-    printf("Usage: p_sort <number> [<no_of_workers>]\n");
-    exit(0);
-  }
-
-  if ((argc == 3)){
-    num_workers = atol(argv[2]);
-    if (num_workers <= 1){
-      printf("Error: Worker thread count must be greater than 1\n");
-      exit(0);
-    }
-  }
-  size = atol(argv[1]);
-  intarr = (unsigned int *)malloc(size*sizeof(unsigned int));
-  if (intarr == NULL) {perror("malloc"); exit(0); }
-  
-  // set the random seed for generating a fixed random
-  // sequence across different runs
-  char * env = getenv("RANNUM");  //get the env variable
-  if (!env)                       //if not exists
-    srandom(3230);
-  else
-    srandom(atol(env));
-  
-  for (i=0; i<size; i++) {
-    intarr[i] = random();
-  }
-  
-  // measure the start time
-  gettimeofday(&start, NULL);
-  
-  // just call the qsort library
-  // replace qsort by your parallel sorting algorithm using pthread
-  qsort(intarr, size, sizeof(unsigned int), compare);
-
-  // measure the end time
-  gettimeofday(&end, NULL);
-  
-  if (!checking(intarr, size)) {
-    printf("The array is not in sorted order!!\n");
-  }
-  
-  printf("Total elapsed time: %.4f s\n", (end.tv_sec - start.tv_sec)*1.0 + (end.tv_usec - start.tv_usec)/1000000.0);
-    
   free(intarr);
   return 0;
 }
