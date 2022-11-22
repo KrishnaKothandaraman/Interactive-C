@@ -101,19 +101,60 @@ int checking(unsigned int * list, long size) {
 int arr[] = {42, 98, 2, 31, 86, 87, 5, 13, 99, 44, 67, 37, 17, 7, 87, 3, 96, 71, 40, 19, 58, 13, 61, 77, 11, 13, 6, 81, 76, 18, 24, 14, 63, 59, 99, 17, 36, 84, 1, 48};
 int size2 = 40;
 const num_threads = 4;
+// every thread will push it's partitions here
+long *global_partitions[num_threads][num_threads - 1];
+pthread_mutex_t mutex;
 
 // struct that keeps track of start and stop data for a thread. Used for sorting subarrays
 typedef struct start_stop_struct {
+    // keeps track of which thread this is for partitioning purposes
+    int *thread_count;
+    // start idx of where its going to sort
     long start_idx;
+    // how many it's going to sort
     long len;
+    // samples after phase 1
     long *samples[num_threads];
+    // pivots after phase 2
     long *pivots[num_threads - 1];
 } start_stop_struct;
+
+void *phase3_and_phase4(void* arg){
+  start_stop_struct *s = (start_stop_struct*)arg;
+  printf("Thread %d running routine start idx %ld len %ld\n", (s->start_idx)/(size2/num_threads) ,s->start_idx, s->len);
+  // stores local partitions
+  long *local_partitions[num_threads][size2/num_threads];
+  int start = 0;
+  int j;
+  pthread_mutex_lock(&mutex);
+  for (int i = 0; i < num_threads - 1; i++){
+    j = start;
+    while (j < 10 && (arr[s->start_idx + j] <= s->pivots[i])){
+      j++;
+    }
+    printf("Found partition start: %d end %d\n", start, j-1);
+    for (int l = start; l <= j - 1; l++){
+      printf("Setting index %d of local partition row %d = %ld\n", l - start, i, arr[s->start_idx + l]);
+      local_partitions[i][l - start] = arr[s->start_idx + l];
+    }
+    start = j;
+    }
+
+    printf("Found partition start: %d end %d\n", start, s->len - 1);
+    for (int l = start; l <= s->len - 1; l++){
+      printf("Setting index %d of local partition row %d = %ld\n", l - start, num_threads - 1, arr[s->start_idx + l]);
+      local_partitions[num_threads - 1][l - start] = arr[s->start_idx + l];
+    }
+    pthread_mutex_unlock(&mutex);
+
+
+
+}
 
 void *sort_subarr(void* arg){
   // parsing argument given into struct
   start_stop_struct *s = (start_stop_struct*)arg;
-  printf("Start sorting at %ld!\n", s->start_idx);
+  printf("Thread %d Start sorting at %ld!\n", s->thread_count ,s->start_idx);
   // sort array of size length starting from index
   qsort(arr + s->start_idx, s->len, sizeof(int), compare);
 
@@ -127,8 +168,10 @@ int main(){
 
   pthread_t th[num_threads];
   start_stop_struct* st = malloc(num_threads * sizeof(start_stop_struct));
+  pthread_mutex_init(&mutex, NULL);
 
   for (int i = 0; i < num_threads; i++){
+    st[i].thread_count = i;
     st[i].start_idx = i*(size2/num_threads);
     if ((i == num_threads - 1) && (size2 % num_threads != 0)){
       st[i].len = size2 - st[i].start_idx;
@@ -138,7 +181,6 @@ int main(){
       st[i].len = (size2/num_threads);
     }
   }
-
   // create buckets and sort each bucket
   for (int i = 0; i < num_threads; i++){
     pthread_create(&th[i], NULL, &sort_subarr, &st[i]);
@@ -149,7 +191,7 @@ int main(){
   }
 
   for (int i = 0; i< num_threads ;i++){
-    printf("Thread %d Sample values\n", i);
+    printf("Thread %d Sample values\n", st[i].thread_count);
     for (int j =0; j<num_threads; j++){
       printf("Sample %d: %ld\n", j, st[i].samples[j]);
     }
@@ -182,15 +224,33 @@ int main(){
   }
 
   printf("Pivots\n");
-  for (int i =0; i < num_threads - 1; i++){
+  for (int i = 0; i < num_threads - 1; i++){
     printf("Pivot main %d: %ld\n", i, pivots_main[i]);
   }
-
+  // assign pivots to structs
   for (int i = 0; i < num_threads; i++){
-    for (int j =0; j< num_threads; j++){
+    for (int j =0; j < num_threads - 1; j++){
       st[i].pivots[j] = pivots_main[j];
     }
   }
+
+  printf("Thread 1");
+  for (int i = 0; i < num_threads - 1; i++){
+    printf("Thread 1 pivots: %ld\n", st[1].pivots[i]);
+  }
+
+  /*
+  1. Recreate thread and assign new routine
+  */
+
+  for (int i = 0; i < num_threads; i++){
+    pthread_create(&th[i], NULL, &phase3_and_phase4, &st[i]);
+  }
+  // wait for buckets to sort. Collect pivots in the struct
+  for (int i = 0 ; i < num_threads; i++){
+    pthread_join(th[i], &st[i]);
+  }
+
 
 
   if (!checking(arr, (size2/num_threads))) {
@@ -203,6 +263,28 @@ int main(){
   //   printf("%d: %d\n", i, arr[i]);
   // }
 
+  pthread_mutex_destroy(&mutex);
   free(st);
+  return 0;
+}
+
+
+int main3(){
+  int nums[9] = {3, 7,17,19,37,40,67,71,87,96};
+
+  int pivots[3] = {13,44,71};
+
+  int start = 0;
+  int j;
+  for (int i = 0; i< 3; i++){
+    j = start;
+    while (j < 10 && (nums[j] <= pivots[i])){
+      j++;
+    }
+    printf("Found partition start: %d end %d\n", start, j-1);
+    start = j;
+    }
+
+    printf("Found partition start: %d end %d\n", start, 9);
   return 0;
 }
