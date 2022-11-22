@@ -106,8 +106,8 @@ const num_threads = 4;
 typedef struct start_stop_struct {
     long start_idx;
     long len;
-    long pivot_ctr;
-    long *pivots[num_threads];
+    long *samples[num_threads];
+    long *pivots[num_threads - 1];
 } start_stop_struct;
 
 void *sort_subarr(void* arg){
@@ -118,7 +118,7 @@ void *sort_subarr(void* arg){
   qsort(arr + s->start_idx, s->len, sizeof(int), compare);
 
   for (int i = 0; i< num_threads; i++){
-    s->pivots[i] = arr[s->start_idx + (i*size2)/(num_threads*num_threads)];
+    s->samples[i] = arr[s->start_idx + (i*size2)/(num_threads*num_threads)];
   }
   pthread_exit(s);
 }
@@ -130,7 +130,6 @@ int main(){
 
   for (int i = 0; i < num_threads; i++){
     st[i].start_idx = i*(size2/num_threads);
-    st[i].pivot_ctr = num_threads;
     if ((i == num_threads - 1) && (size2 % num_threads != 0)){
       st[i].len = size2 - st[i].start_idx;
       printf("%d: len = %d\n", i, st[i].len);
@@ -150,9 +149,9 @@ int main(){
   }
 
   for (int i = 0; i< num_threads ;i++){
-    printf("Thread %d pivot values\n", i);
+    printf("Thread %d Sample values\n", i);
     for (int j =0; j<num_threads; j++){
-      printf("Pivot %d: %ld\n", j, st[i].pivots[j]);
+      printf("Sample %d: %ld\n", j, st[i].samples[j]);
     }
   }
 
@@ -162,16 +161,37 @@ int main(){
   // save pivots into combined array
   for (int i = 0; i < num_threads; i++){
     for(int j=0; j<num_threads;j++){
-      pivot_combined[i*num_threads + j] = st[i].pivots[j];
+      pivot_combined[i*num_threads + j] = st[i].samples[j];
     }
   }
   // sort pivots in main
   qsort(pivot_combined, num_threads*num_threads, sizeof(long), compare);
-  printf("Sorted pivots: ");
+  printf("Sorted samples: ");
   for (int i=0;i<num_threads*num_threads;i++){
     printf("%ld ", pivot_combined[i]);
   }
   printf("\n");
+
+  // choose pivot values from p + (p/2) - 1, 2p + (p/2) -1 .... (p-1)p + (p/2) - 1
+
+  long *pivots_main[num_threads];
+
+  // pick p-1 pivots
+  for (int i =0; i < num_threads; i++){
+    pivots_main[i] = pivot_combined[(i+1)*num_threads + (num_threads/2) - 1];
+  }
+
+  printf("Pivots\n");
+  for (int i =0; i < num_threads - 1; i++){
+    printf("Pivot main %d: %ld\n", i, pivots_main[i]);
+  }
+
+  for (int i = 0; i < num_threads; i++){
+    for (int j =0; j< num_threads; j++){
+      st[i].pivots[j] = pivots_main[j];
+    }
+  }
+
 
   if (!checking(arr, (size2/num_threads))) {
     printf("The array is not in sorted order!!\n");
